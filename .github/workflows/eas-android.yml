@@ -1,0 +1,54 @@
+name: Build Android APK (EAS)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Expo login (token)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          echo "$EXPO_TOKEN" | eas login --token
+
+      - name: Run EAS build (android)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas build --platform android --profile production --non-interactive
+
+      - name: Get latest build info and download APK
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          # Ambil buildId dari daftar build terbaru
+          BUILD_ID=$(eas build:list --platform android --status finished --limit 1 --json | jq -r '.[0].id')
+          # Ambil URL artifact
+          ARTIFACT_URL=$(eas build:view --platform android --id "$BUILD_ID" --json | jq -r '.artifacts[0].url')
+          echo "Artifact URL: $ARTIFACT_URL"
+          # Download APK
+          curl -L -o app.apk "$ARTIFACT_URL"
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: app.apk
