@@ -20,8 +20,7 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Cache yarn or npm (optional)
-        if: runner.os == 'Linux'
+      - name: Cache npm
         uses: actions/cache@v4
         with:
           path: |
@@ -43,11 +42,14 @@ jobs:
         run: |
           echo "$EXPO_TOKEN" | eas login --token
 
-      - name: (Optional) Restore Android keystore from secret
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      - name: Restore Android keystore from secret (optional)
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "ANDROID_KEYSTORE_BASE64 not set, skipping keystore restore"
+            exit 0
+          fi
           echo "$KEYSTORE_B64" | base64 --decode > android.keystore
           ls -l android.keystore
 
@@ -56,20 +58,17 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
         run: |
-          # Pastikan profile di eas.json sesuai (mis: production)
           eas build --platform android --profile production --non-interactive
 
       - name: Download latest finished Android build artifact
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          # Ambil build id terakhir yang status finished
           BUILD_ID=$(eas build:list --platform android --status finished --limit 1 --json | jq -r '.[0].id')
           if [ -z "$BUILD_ID" ] || [ "$BUILD_ID" = "null" ]; then
             echo "No finished build found"
             exit 1
           fi
-          echo "Found build id: $BUILD_ID"
           ARTIFACT_URL=$(eas build:view --platform android --id "$BUILD_ID" --json | jq -r '.artifacts[0].url')
           echo "Artifact URL: $ARTIFACT_URL"
           curl -L -o app.apk "$ARTIFACT_URL"
