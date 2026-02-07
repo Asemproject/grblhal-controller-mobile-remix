@@ -8,46 +8,73 @@ on:
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: "--max_old_space_size=4096"
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+
+      - name: Cache yarn or npm (optional)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
 
       - name: Install dependencies
-        run: |
-          npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Install EAS CLI
         run: npm install -g eas-cli
 
-      - name: Expo login (token)
+      - name: Expo login using token
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           echo "$EXPO_TOKEN" | eas login --token
 
-      - name: Run EAS build (android)
+      - name: (Optional) Restore Android keystore from secret
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 --decode > android.keystore
+          ls -l android.keystore
+
+      - name: Run EAS build for Android
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
         run: |
+          # Pastikan profile di eas.json sesuai (mis: production)
           eas build --platform android --profile production --non-interactive
 
-      - name: Get latest build info and download APK
+      - name: Download latest finished Android build artifact
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          # Ambil buildId dari daftar build terbaru
+          # Ambil build id terakhir yang status finished
           BUILD_ID=$(eas build:list --platform android --status finished --limit 1 --json | jq -r '.[0].id')
-          # Ambil URL artifact
+          if [ -z "$BUILD_ID" ] || [ "$BUILD_ID" = "null" ]; then
+            echo "No finished build found"
+            exit 1
+          fi
+          echo "Found build id: $BUILD_ID"
           ARTIFACT_URL=$(eas build:view --platform android --id "$BUILD_ID" --json | jq -r '.artifacts[0].url')
           echo "Artifact URL: $ARTIFACT_URL"
-          # Download APK
           curl -L -o app.apk "$ARTIFACT_URL"
-      - name: Upload APK as artifact
+
+      - name: Upload APK as GitHub artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
